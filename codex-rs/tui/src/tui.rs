@@ -33,6 +33,7 @@ use ratatui::crossterm::terminal::enable_raw_mode;
 use ratatui::layout::Offset;
 use ratatui::layout::Position;
 use ratatui::layout::Rect;
+use ratatui::layout::Size;
 use ratatui::text::Line;
 use tokio::sync::broadcast;
 use tokio_stream::Stream;
@@ -41,6 +42,7 @@ pub use self::frame_requester::FrameRequester;
 use crate::custom_terminal;
 use crate::custom_terminal::Terminal as CustomTerminal;
 use crate::insert_history::HistoryLineWrapPolicy;
+use crate::insert_history::InsertHistoryMode;
 use crate::notifications::DesktopNotificationBackend;
 use crate::notifications::detect_backend;
 use crate::tui::event_stream::EventBroker;
@@ -688,6 +690,7 @@ impl Tui {
     fn update_inline_viewport_for_resize_reflow(
         terminal: &mut Terminal,
         height: u16,
+        use_scrollback_safe_inline_mode: bool,
     ) -> Result<bool> {
         let size = terminal.size()?;
         let terminal_height_shrank = size.height < terminal.last_known_screen_size.height;
@@ -704,9 +707,14 @@ impl Tui {
         if area.bottom() > size.height {
             let scroll_by = area.bottom() - size.height;
             if !terminal_height_shrank {
-                terminal
-                    .backend_mut()
-                    .scroll_region_up(0..area.top(), scroll_by)?;
+                if use_scrollback_safe_inline_mode {
+                    Self::scroll_scrollback_safe_expanded_viewport(terminal, size, scroll_by)?;
+                    needs_full_repaint = true;
+                } else {
+                    terminal
+                        .backend_mut()
+                        .scroll_region_up(0..area.top(), scroll_by)?;
+                }
             }
             area.y = size.height - area.height;
         } else if terminal_height_grew && viewport_was_bottom_aligned {
@@ -723,24 +731,42 @@ impl Tui {
         Ok(needs_full_repaint)
     }
 
+    fn scroll_scrollback_safe_expanded_viewport(
+        terminal: &mut Terminal,
+        size: Size,
+        scroll_by: u16,
+    ) -> Result<()> {
+        crossterm::queue!(
+            terminal.backend_mut(),
+            crossterm::cursor::MoveTo(0, size.height.saturating_sub(1))
+        )?;
+        for _ in 0..scroll_by {
+            crossterm::queue!(terminal.backend_mut(), crossterm::style::Print("\n"))?;
+        }
+        Ok(())
+    }
+
     /// Write any buffered history lines above the viewport and clear the buffer.
     fn flush_pending_history_lines(
         terminal: &mut Terminal,
         pending_history_lines: &mut Vec<PendingHistoryLines>,
-    ) -> Result<()> {
+        use_scrollback_safe_inline_mode: bool,
+    ) -> Result<bool> {
         if pending_history_lines.is_empty() {
-            return Ok(());
+            return Ok(false);
         }
 
+        let mode = InsertHistoryMode::new(use_scrollback_safe_inline_mode);
         for batch in pending_history_lines.iter() {
-            crate::insert_history::insert_history_lines_with_wrap_policy(
+            crate::insert_history::insert_history_lines_with_mode_and_wrap_policy(
                 terminal,
                 batch.lines.clone(),
+                mode,
                 batch.wrap_policy,
             )?;
         }
         pending_history_lines.clear();
-        Ok(())
+        Ok(use_scrollback_safe_inline_mode)
     }
 
     pub fn draw(
@@ -765,12 +791,14 @@ impl Tui {
                 prepared.apply(&mut self.terminal)?;
             }
 
+            let use_scrollback_safe_inline_mode = !self.alt_screen_enabled;
             let terminal = &mut self.terminal;
             if let Some(new_area) = pending_viewport_area.take() {
                 terminal.set_viewport_area(new_area);
                 terminal.clear()?;
             }
 
+            let mut needs_full_repaint = false;
             let size = terminal.size()?;
 
             let mut area = terminal.viewport_area;
@@ -778,9 +806,15 @@ impl Tui {
             area.width = size.width;
             // If the viewport has expanded, scroll everything else up to make room.
             if area.bottom() > size.height {
-                terminal
-                    .backend_mut()
-                    .scroll_region_up(0..area.top(), area.bottom() - size.height)?;
+                let scroll_by = area.bottom() - size.height;
+                if use_scrollback_safe_inline_mode {
+                    Self::scroll_scrollback_safe_expanded_viewport(terminal, size, scroll_by)?;
+                    needs_full_repaint = true;
+                } else {
+                    terminal
+                        .backend_mut()
+                        .scroll_region_up(0..area.top(), scroll_by)?;
+                }
                 area.y = size.height - area.height;
             }
             if area != terminal.viewport_area {
@@ -790,7 +824,15 @@ impl Tui {
                 terminal.set_viewport_area(area);
             }
 
-            Self::flush_pending_history_lines(terminal, &mut self.pending_history_lines)?;
+            needs_full_repaint |= Self::flush_pending_history_lines(
+                terminal,
+                &mut self.pending_history_lines,
+                use_scrollback_safe_inline_mode,
+            )?;
+
+            if needs_full_repaint {
+                terminal.invalidate_viewport();
+            }
 
             // Update the y position for suspending so Ctrl-Z can place the cursor correctly.
             #[cfg(unix)]
@@ -879,10 +921,18 @@ impl Tui {
                 prepared.apply(&mut self.terminal)?;
             }
 
+            let use_scrollback_safe_inline_mode = !self.alt_screen_enabled;
             let terminal = &mut self.terminal;
-            let needs_full_repaint =
-                Self::update_inline_viewport_for_resize_reflow(terminal, height)?;
-            Self::flush_pending_history_lines(terminal, &mut self.pending_history_lines)?;
+            let mut needs_full_repaint = Self::update_inline_viewport_for_resize_reflow(
+                terminal,
+                height,
+                use_scrollback_safe_inline_mode,
+            )?;
+            needs_full_repaint |= Self::flush_pending_history_lines(
+                terminal,
+                &mut self.pending_history_lines,
+                use_scrollback_safe_inline_mode,
+            )?;
 
             if needs_full_repaint {
                 terminal.invalidate_viewport();
