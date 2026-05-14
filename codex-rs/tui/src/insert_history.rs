@@ -896,6 +896,40 @@ mod tests {
     }
 
     #[test]
+    fn vt100_scrollback_safe_mode_scrolls_when_viewport_is_bottom_aligned() {
+        let width: u16 = 32;
+        let height: u16 = 8;
+        let backend = VT100Backend::new(width, height);
+        let mut term = crate::custom_terminal::Terminal::with_options(backend).expect("terminal");
+        let viewport = Rect::new(0, height - 2, width, 2);
+        term.set_viewport_area(viewport);
+
+        let lines: Vec<Line<'static>> = vec![
+            Line::from("safe history one"),
+            Line::from("safe history two"),
+        ];
+        insert_history_lines_with_mode_and_wrap_policy(
+            &mut term,
+            lines,
+            InsertHistoryMode::ScrollbackSafe,
+            HistoryLineWrapPolicy::PreWrap,
+        )
+        .expect("insert bottom-aligned scrollback-safe history");
+
+        let rows: Vec<String> = term.backend().vt100().screen().rows(0, width).collect();
+        assert!(
+            rows.iter().any(|row| row.contains("safe history one")),
+            "expected first scrollback-safe history row in screen output, rows: {rows:?}"
+        );
+        assert!(
+            rows.iter().any(|row| row.contains("safe history two")),
+            "expected second scrollback-safe history row in screen output, rows: {rows:?}"
+        );
+        assert_eq!(term.viewport_area, viewport);
+        assert_eq!(term.visible_history_rows(), 2);
+    }
+
+    #[test]
     fn vt100_unwrapped_url_like_clears_continuation_rows() {
         let width: u16 = 20;
         let height: u16 = 10;
