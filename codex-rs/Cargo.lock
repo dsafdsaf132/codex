@@ -1907,6 +1907,7 @@ dependencies = [
  "codex-hooks",
  "codex-login",
  "codex-mcp",
+ "codex-memories-extension",
  "codex-memories-write",
  "codex-model-provider",
  "codex-model-provider-info",
@@ -2242,6 +2243,7 @@ dependencies = [
  "codex-memories-write",
  "codex-model-provider",
  "codex-models-manager",
+ "codex-plugin",
  "codex-protocol",
  "codex-responses-api-proxy",
  "codex-rmcp-client",
@@ -2714,6 +2716,7 @@ dependencies = [
  "codex-utils-cargo-bin",
  "codex-utils-cli",
  "codex-utils-oss",
+ "codex-utils-sandbox-summary",
  "core_test_support",
  "libc",
  "opentelemetry",
@@ -2745,6 +2748,7 @@ dependencies = [
  "axum",
  "base64 0.22.1",
  "bytes",
+ "codex-api",
  "codex-app-server-protocol",
  "codex-client",
  "codex-file-system",
@@ -2756,6 +2760,7 @@ dependencies = [
  "codex-utils-rustls-provider",
  "ctor 0.6.3",
  "futures",
+ "http 1.4.0",
  "pretty_assertions",
  "prost 0.14.3",
  "reqwest",
@@ -3137,6 +3142,7 @@ dependencies = [
 name = "codex-memories-extension"
 version = "0.0.0"
 dependencies = [
+ "async-trait",
  "codex-core",
  "codex-extension-api",
  "codex-features",
@@ -3729,6 +3735,7 @@ dependencies = [
 name = "codex-tools"
 version = "0.0.0"
 dependencies = [
+ "async-trait",
  "codex-app-server-protocol",
  "codex-code-mode",
  "codex-features",
@@ -3782,6 +3789,7 @@ dependencies = [
  "codex-protocol",
  "codex-realtime-webrtc",
  "codex-rollout",
+ "codex-sandboxing",
  "codex-shell-command",
  "codex-state",
  "codex-terminal-detection",
@@ -3791,6 +3799,7 @@ dependencies = [
  "codex-utils-cli",
  "codex-utils-elapsed",
  "codex-utils-fuzzy-match",
+ "codex-utils-home-dir",
  "codex-utils-oss",
  "codex-utils-path",
  "codex-utils-plugins",
@@ -3910,6 +3919,7 @@ version = "0.0.0"
 dependencies = [
  "clap",
  "codex-protocol",
+ "codex-shell-command",
  "pretty_assertions",
  "serde",
  "toml 0.9.11+spec-1.1.0",
