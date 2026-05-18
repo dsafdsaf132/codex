@@ -13,6 +13,8 @@ use crossterm::event::PopKeyboardEnhancementFlags;
 use crossterm::event::PushKeyboardEnhancementFlags;
 use ratatui::crossterm::execute;
 
+use super::xterm_compat;
+
 const DISABLE_KEYBOARD_ENHANCEMENT_ENV_VAR: &str = "CODEX_TUI_DISABLE_KEYBOARD_ENHANCEMENT";
 
 pub(super) fn keyboard_enhancement_disabled() -> bool {
