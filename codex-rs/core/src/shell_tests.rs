@@ -48,6 +48,11 @@ fn can_run_on_shell_test() {
     let cmd = "echo \"Works\"";
     if cfg!(windows) {
         assert!(shell_works(
+            get_shell(ShellType::Bash),
+            cmd,
+            /*required*/ false,
+        ));
+        assert!(shell_works(
             get_shell(ShellType::PowerShell),
             "Out-String 'Works'",
             /*required*/ true,
@@ -164,15 +169,20 @@ async fn test_current_shell_detects_zsh() {
 }
 
 #[tokio::test]
-async fn detects_powershell_as_default() {
+async fn detects_windows_default_shell() {
     if !cfg!(windows) {
         return;
     }
 
-    let powershell_shell = default_user_shell();
-    let shell_path = powershell_shell.shell_path;
+    let default_shell = default_user_shell();
+    let shell_path = default_shell.shell_path.to_string_lossy().to_lowercase();
 
-    assert!(shell_path.ends_with("pwsh.exe") || shell_path.ends_with("powershell.exe"));
+    assert!(
+        shell_path.ends_with("bash.exe")
+            || shell_path.ends_with("cmd.exe")
+            || shell_path.ends_with("pwsh.exe")
+            || shell_path.ends_with("powershell.exe")
+    );
 }
 
 #[test]

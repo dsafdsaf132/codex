@@ -38,15 +38,19 @@ impl DetectedShell {
 
 pub fn detect_shell_type(shell_path: impl AsRef<std::path::Path>) -> Option<ShellType> {
     let shell_path = shell_path.as_ref();
-    match shell_path.as_os_str().to_str() {
+    let lower = shell_path.as_os_str().to_str().map(str::to_ascii_lowercase);
+    match lower.as_deref() {
         Some("zsh") => Some(ShellType::Zsh),
         Some("sh") => Some(ShellType::Sh),
-        Some("cmd") => Some(ShellType::Cmd),
-        Some("bash") => Some(ShellType::Bash),
-        Some("pwsh") => Some(ShellType::PowerShell),
-        Some("powershell") => Some(ShellType::PowerShell),
+        Some("cmd") | Some("cmd.exe") => Some(ShellType::Cmd),
+        Some("bash") | Some("bash.exe") => Some(ShellType::Bash),
+        Some("pwsh") | Some("pwsh.exe") | Some("powershell") | Some("powershell.exe") => {
+            Some(ShellType::PowerShell)
+        }
         _ => {
-            let shell_name = shell_path.file_stem();
+            let s = shell_path.to_str().unwrap_or("");
+            let base = s.rsplit(['/', '\\']).next().unwrap_or(s);
+            let shell_name = std::path::Path::new(base).file_stem();
             if let Some(shell_name) = shell_name {
                 let shell_name_path = std::path::Path::new(shell_name);
                 if shell_name_path != shell_path {
@@ -226,10 +230,24 @@ fn get_zsh_shell() -> Option<DetectedShell> {
     })
 }
 
+#[cfg(windows)]
+const BASH_FALLBACK_PATHS: &[&str] = &[
+    r#"C:\Program Files\Git\bin\bash.exe"#,
+    r#"C:\Program Files\Git\usr\bin\bash.exe"#,
+    r#"C:\Program Files (x86)\Git\bin\bash.exe"#,
+    r#"C:\Program Files (x86)\Git\usr\bin\bash.exe"#,
+];
+#[cfg(not(windows))]
 const BASH_FALLBACK_PATHS: &[&str] = &["/bin/bash", "/usr/bin/bash"];
 
 fn get_bash_shell() -> Option<DetectedShell> {
-    let shell_path = get_shell_path(ShellType::Bash, "bash", BASH_FALLBACK_PATHS);
+    let shell_path = get_shell_path(ShellType::Bash, "bash", BASH_FALLBACK_PATHS).or_else(|| {
+        if cfg!(windows) {
+            get_shell_path(ShellType::Bash, "bash.exe", BASH_FALLBACK_PATHS)
+        } else {
+            None
+        }
+    });
 
     shell_path.map(|shell_path| DetectedShell {
         shell_type: ShellType::Bash,
@@ -303,8 +321,19 @@ pub fn fallback_powershell_shell_for_elevated_windows_sandbox(
     })
 }
 
+#[cfg(windows)]
+const CMD_FALLBACK_PATHS: &[&str] = &[r#"C:\Windows\System32\cmd.exe"#];
+#[cfg(not(windows))]
+const CMD_FALLBACK_PATHS: &[&str] = &[];
+
 fn get_cmd_shell() -> Option<DetectedShell> {
-    let shell_path = get_shell_path(ShellType::Cmd, "cmd", &[]);
+    let shell_path = get_shell_path(ShellType::Cmd, "cmd", CMD_FALLBACK_PATHS).or_else(|| {
+        if cfg!(windows) {
+            get_shell_path(ShellType::Cmd, "cmd.exe", CMD_FALLBACK_PATHS)
+        } else {
+            None
+        }
+    });
 
     shell_path.map(|shell_path| DetectedShell {
         shell_type: ShellType::Cmd,
@@ -348,13 +377,17 @@ pub fn default_user_shell() -> DetectedShell {
 }
 
 pub fn default_user_shell_from_path(user_shell_path: Option<PathBuf>) -> DetectedShell {
-    if cfg!(windows) {
-        get_shell(ShellType::PowerShell).unwrap_or_else(ultimate_fallback_shell)
-    } else {
-        let user_default_shell = user_shell_path
-            .and_then(|shell| detect_shell_type(&shell))
-            .and_then(get_shell);
+    let user_default_shell = user_shell_path
+        .and_then(|shell| detect_shell_type(&shell))
+        .and_then(get_shell);
 
+    if cfg!(windows) {
+        user_default_shell
+            .or_else(|| get_shell(ShellType::Bash))
+            .or_else(|| get_shell(ShellType::Cmd))
+            .or_else(|| get_shell(ShellType::PowerShell))
+            .unwrap_or_else(ultimate_fallback_shell)
+    } else {
         let shell_with_fallback = if cfg!(target_os = "macos") {
             user_default_shell
                 .or_else(|| get_shell(ShellType::Zsh))
@@ -491,5 +524,44 @@ mod tests {
             detect_shell_type(PathBuf::from("cmd.exe")),
             Some(ShellType::Cmd)
         );
+        assert_eq!(
+            detect_shell_type(PathBuf::from("bash.exe")),
+            Some(ShellType::Bash)
+        );
+        assert_eq!(
+            detect_shell_type(PathBuf::from("BASH.EXE")),
+            Some(ShellType::Bash)
+        );
+        assert_eq!(
+            detect_shell_type(PathBuf::from(r"C:\Program Files\Git\bin\bash.exe")),
+            Some(ShellType::Bash)
+        );
+        assert_eq!(
+            detect_shell_type(PathBuf::from(r"C:\Program Files\Git\usr\bin\bash.exe")),
+            Some(ShellType::Bash)
+        );
+        assert_eq!(
+            detect_shell_type(PathBuf::from("CMD.EXE")),
+            Some(ShellType::Cmd)
+        );
+        assert_eq!(
+            detect_shell_type(PathBuf::from("PWSH.EXE")),
+            Some(ShellType::PowerShell)
+        );
+    }
+
+    #[test]
+    fn test_default_user_shell_from_path_explicit_override() {
+        let cmd_path = if cfg!(windows) {
+            PathBuf::from(r"C:\Windows\System32\cmd.exe")
+        } else {
+            PathBuf::from("/bin/sh")
+        };
+        let detected = default_user_shell_from_path(Some(cmd_path));
+        if cfg!(windows) {
+            assert_eq!(detected.shell_type, ShellType::Cmd);
+        } else {
+            assert_eq!(detected.shell_type, ShellType::Sh);
+        }
     }
 }
